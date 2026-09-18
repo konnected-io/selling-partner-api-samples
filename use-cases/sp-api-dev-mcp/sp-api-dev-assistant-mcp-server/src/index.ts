@@ -17,7 +17,7 @@ import {
   ExploreCatalogTool,
   exploreCatalogSchema,
 } from "./tools/explore-catalog-tool.js";
-import { createAuthenticatorFromEnv } from "./auth/sp-api-auth.js";
+import { createAuthenticatorProviderFromEnv } from "./auth/sp-api-auth.js";
 import type { ApiCatalog } from "./types/api-catalog.js";
 import { config } from "dotenv";
 import { readFileSync } from "fs";
@@ -80,13 +80,15 @@ class SPAPIDevMCPServer {
   private async getExecuteTool(): Promise<ExecuteApiTool> {
     if (!this.executeTool) {
       const catalog = await this.ensureCatalogLoaded();
-      const authenticator = createAuthenticatorFromEnv();
-      if (!authenticator) {
+      const authenticatorProvider = createAuthenticatorProviderFromEnv();
+      if (!authenticatorProvider) {
         throw new Error(
-          "SP-API credentials not configured. Set SP_API_CLIENT_ID, SP_API_CLIENT_SECRET, and SP_API_REFRESH_TOKEN environment variables to use sp_api_execute.",
+          "SP-API credentials not configured. Set the legacy SP_API_CLIENT_ID, " +
+            "SP_API_CLIENT_SECRET, and SP_API_REFRESH_TOKEN variables, or configure " +
+            "regional SP_API_<REGION>_* credentials, to use sp_api_execute.",
         );
       }
-      this.executeTool = new ExecuteApiTool(catalog, authenticator);
+      this.executeTool = new ExecuteApiTool(catalog, authenticatorProvider);
     }
     return this.executeTool;
   }

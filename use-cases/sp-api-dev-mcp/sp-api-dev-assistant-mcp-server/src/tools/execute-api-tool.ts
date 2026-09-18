@@ -4,7 +4,11 @@ import { z } from "zod";
 import axios from "axios";
 import { ApiCatalog, ApiEndpoint, ApiParameter } from "../types/api-catalog.js";
 import { logger } from "../utils/logger.js";
-import { SpApiAuthenticator } from "../auth/sp-api-auth.js";
+import {
+  SpApiAuthenticator,
+  SpApiAuthenticatorProvider,
+  SpApiRegion,
+} from "../auth/sp-api-auth.js";
 
 export const executeApiSchema = z.object({
   endpoint: z
@@ -45,9 +49,7 @@ const SP_API_ENDPOINTS = {
   FE: "https://sellingpartnerapi-fe.amazon.com",
 } as const;
 
-type SellingRegion = keyof typeof SP_API_ENDPOINTS;
-
-const REGION_ALIASES: Record<string, SellingRegion> = {
+const REGION_ALIASES: Record<string, SpApiRegion> = {
   // Selling regions
   na: "NA",
   "north america": "NA",
@@ -96,9 +98,13 @@ const REGION_ALIASES: Record<string, SellingRegion> = {
   singapore: "FE",
 };
 
-export function resolveRegionEndpoint(region: string): string | null {
+export function resolveSellingRegion(region: string): SpApiRegion | null {
   const key = region.trim().toLowerCase();
-  const sellingRegion = REGION_ALIASES[key];
+  return REGION_ALIASES[key] || null;
+}
+
+export function resolveRegionEndpoint(region: string): string | null {
+  const sellingRegion = resolveSellingRegion(region);
   return sellingRegion ? SP_API_ENDPOINTS[sellingRegion] : null;
 }
 
@@ -135,10 +141,17 @@ interface ExecutionResult {
 }
 
 export class ExecuteApiTool {
+  private authenticatorProvider: SpApiAuthenticatorProvider;
+
   constructor(
     private catalog: ApiCatalog,
-    private authenticator: SpApiAuthenticator,
-  ) {}
+    authenticator: SpApiAuthenticator | SpApiAuthenticatorProvider,
+  ) {
+    this.authenticatorProvider =
+      "getAuthenticator" in authenticator
+        ? authenticator
+        : { getAuthenticator: () => authenticator };
+  }
 
   async execute(params: ExecuteApiParams): Promise<string> {
     logger.debug(
@@ -173,8 +186,17 @@ export class ExecuteApiTool {
       // Resolve region: explicit param > SP_API_REGION env var > warn + default NA
       const region = this.resolveRegion(params.region);
 
+      // Select credentials for this request's selling region. Each regional
+      // authenticator owns its own access-token cache.
+      const authenticator = this.authenticatorProvider.getAuthenticator(region);
+
       // Build request URL
-      const url = this.buildUrl(endpoint, params.parameters, region);
+      const url = this.buildUrl(
+        endpoint,
+        params.parameters,
+        region,
+        authenticator,
+      );
 
       // Prepare headers
       const headers = this.prepareHeaders(endpoint, params.additionalHeaders);
@@ -190,6 +212,7 @@ export class ExecuteApiTool {
         body,
         endpoint,
         params,
+        authenticator,
       });
 
       // Format the result
@@ -291,25 +314,28 @@ export class ExecuteApiTool {
   /**
    * Resolve the effective region string, falling back to SP_API_REGION,
    * then warning and using "NA" so the request is never silently misrouted.
-   * Skipped entirely when SP_API_BASE_URL is explicitly set.
    */
-  private resolveRegion(paramRegion: string | undefined): string {
-    if (paramRegion && paramRegion.trim()) {
-      return paramRegion;
-    }
+  private resolveRegion(paramRegion: string | undefined): SpApiRegion {
+    const requestedRegion = paramRegion?.trim() || process.env.SP_API_REGION;
 
-    const envRegion = process.env.SP_API_REGION;
-    if (envRegion && envRegion.trim()) {
-      return envRegion;
-    }
+    if (requestedRegion?.trim()) {
+      const region = resolveSellingRegion(requestedRegion);
+      if (region) {
+        return region;
+      }
 
-    if (!this.authenticator.getExplicitBaseUrl()) {
       logger.warn(
-        "No region specified on the request and SP_API_REGION env var is not set; " +
-          "defaulting to NA. If your seller account is in EU or FE, pass region='EU' or region='FE' " +
-          "(or set SP_API_REGION / SP_API_BASE_URL) to avoid 403 errors.",
+        `Unknown region '${requestedRegion}', defaulting to NA. ` +
+          "Supported values: NA, EU, FE, or country codes (US, UK, DE, JP, etc.).",
       );
+      return "NA";
     }
+
+    logger.warn(
+      "No region specified on the request and SP_API_REGION env var is not set; " +
+        "defaulting to NA. If your seller account is in EU or FE, pass region='EU' or region='FE' " +
+        "(or set SP_API_REGION) to avoid misrouting the request.",
+    );
     return "NA";
   }
 
@@ -350,10 +376,12 @@ export class ExecuteApiTool {
   private buildUrl(
     endpoint: ApiEndpoint,
     parameters: Record<string, any>,
-    region: string,
+    region: SpApiRegion,
+    authenticator: SpApiAuthenticator,
   ): string {
-    // Explicit SP_API_BASE_URL (via authenticator credentials) takes precedence over region mapping.
-    const explicitBaseUrl = this.authenticator.getExplicitBaseUrl();
+    // An explicit base URL on the selected credential profile takes
+    // precedence over region mapping.
+    const explicitBaseUrl = authenticator.getExplicitBaseUrl();
     let spApiEndpoint: string;
 
     if (explicitBaseUrl) {
@@ -500,6 +528,7 @@ export class ExecuteApiTool {
     body,
     endpoint,
     params,
+    authenticator,
   }: {
     method: string;
     url: string;
@@ -507,12 +536,13 @@ export class ExecuteApiTool {
     body?: any;
     endpoint: ApiEndpoint;
     params: ExecuteApiParams;
+    authenticator: SpApiAuthenticator;
   }): Promise<ExecutionResult> {
     try {
       logger.debug(`Executing ${method} request to ${url}`);
 
       // Sign the request
-      const signedRequest = await this.authenticator.signRequest({
+      const signedRequest = await authenticator.signRequest({
         method,
         url,
         headers,

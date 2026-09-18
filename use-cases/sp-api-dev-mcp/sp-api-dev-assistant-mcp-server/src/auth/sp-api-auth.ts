@@ -5,12 +5,19 @@ import aws4 from "aws4";
 import { URL } from "url";
 import { logger } from "../utils/logger.js";
 
-interface SpApiCredentials {
+export interface SpApiCredentials {
   clientId: string;
   clientSecret: string;
   refreshToken: string;
   roleArn?: string;
   baseUrl?: string;
+}
+
+export const SP_API_REGIONS = ["NA", "EU", "FE"] as const;
+export type SpApiRegion = (typeof SP_API_REGIONS)[number];
+
+export interface SpApiAuthenticatorProvider {
+  getAuthenticator(region: SpApiRegion): SpApiAuthenticator;
 }
 
 interface TokenResponse {
@@ -156,6 +163,69 @@ export class SpApiAuthenticator {
     }
   }
 }
+
+class StaticSpApiAuthenticatorProvider implements SpApiAuthenticatorProvider {
+  constructor(private authenticator: SpApiAuthenticator) {}
+
+  getAuthenticator(_region: SpApiRegion): SpApiAuthenticator {
+    return this.authenticator;
+  }
+}
+
+class RegionalSpApiAuthenticatorProvider implements SpApiAuthenticatorProvider {
+  constructor(
+    private authenticators: Partial<Record<SpApiRegion, SpApiAuthenticator>>,
+  ) {}
+
+  getAuthenticator(region: SpApiRegion): SpApiAuthenticator {
+    const authenticator = this.authenticators[region];
+    if (!authenticator) {
+      throw new Error(
+        `SP-API credentials are not configured for region ${region}. ` +
+          `Set SP_API_${region}_CLIENT_ID, SP_API_${region}_CLIENT_SECRET, and ` +
+          `SP_API_${region}_REFRESH_TOKEN.`,
+      );
+    }
+    return authenticator;
+  }
+}
+
+function readRegionalCredentialsFromEnv(
+  region: SpApiRegion,
+): SpApiCredentials | null {
+  const prefix = `SP_API_${region}`;
+  const clientId = process.env[`${prefix}_CLIENT_ID`];
+  const clientSecret = process.env[`${prefix}_CLIENT_SECRET`];
+  const refreshToken = process.env[`${prefix}_REFRESH_TOKEN`];
+  const baseUrl = process.env[`${prefix}_BASE_URL`];
+  const values = [clientId, clientSecret, refreshToken, baseUrl];
+
+  if (!values.some((value) => value !== undefined)) {
+    return null;
+  }
+
+  const missing = [
+    ["CLIENT_ID", clientId],
+    ["CLIENT_SECRET", clientSecret],
+    ["REFRESH_TOKEN", refreshToken],
+  ]
+    .filter(([, value]) => !value)
+    .map(([name]) => `${prefix}_${name}`);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Incomplete SP-API credentials for region ${region}. Missing: ${missing.join(", ")}`,
+    );
+  }
+
+  return {
+    clientId: clientId!,
+    clientSecret: clientSecret!,
+    refreshToken: refreshToken!,
+    baseUrl,
+  };
+}
+
 // Factory to create authenticator from environment variables
 export const createAuthenticatorFromEnv = (): SpApiAuthenticator | null => {
   const clientId = process.env.SP_API_CLIENT_ID || "";
@@ -174,3 +244,40 @@ export const createAuthenticatorFromEnv = (): SpApiAuthenticator | null => {
     baseUrl,
   });
 };
+
+/**
+ * Creates a region-aware authenticator provider from environment variables.
+ *
+ * Regional credentials use SP_API_<REGION>_CLIENT_ID,
+ * SP_API_<REGION>_CLIENT_SECRET, and SP_API_<REGION>_REFRESH_TOKEN, where
+ * REGION is NA, EU, or FE. An optional SP_API_<REGION>_BASE_URL can override
+ * that region's endpoint. If any regional credential variable is present,
+ * regional mode is enabled and the legacy unprefixed credentials are not used
+ * as a fallback for missing regions.
+ *
+ * When no regional credentials are configured, the existing unprefixed
+ * SP_API_CLIENT_ID, SP_API_CLIENT_SECRET, SP_API_REFRESH_TOKEN, and
+ * SP_API_BASE_URL variables remain fully backward compatible.
+ */
+export const createAuthenticatorProviderFromEnv =
+  (): SpApiAuthenticatorProvider | null => {
+    const regionalAuthenticators: Partial<
+      Record<SpApiRegion, SpApiAuthenticator>
+    > = {};
+
+    for (const region of SP_API_REGIONS) {
+      const credentials = readRegionalCredentialsFromEnv(region);
+      if (credentials) {
+        regionalAuthenticators[region] = new SpApiAuthenticator(credentials);
+      }
+    }
+
+    if (Object.keys(regionalAuthenticators).length > 0) {
+      return new RegionalSpApiAuthenticatorProvider(regionalAuthenticators);
+    }
+
+    const authenticator = createAuthenticatorFromEnv();
+    return authenticator
+      ? new StaticSpApiAuthenticatorProvider(authenticator)
+      : null;
+  };

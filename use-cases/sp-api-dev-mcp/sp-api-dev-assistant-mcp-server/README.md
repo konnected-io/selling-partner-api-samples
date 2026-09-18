@@ -13,18 +13,19 @@ A Model Context Protocol (MCP) server that provides tools for interacting with A
   - Returns formatted responses with highlights, insights, and next steps
   - Optionally generates Node.js code snippets
   - Supports region-based endpoint routing (NA, EU, FE)
+  - Supports separate credentials per selling region in one MCP process
 
 **Parameters**:
 
-| Parameter           | Required | Description                                                |
-| ------------------- | -------- | ---------------------------------------------------------- |
-| `endpoint`          | Yes      | SP-API endpoint ID (e.g., `orders_getOrders`)              |
-| `parameters`        | Yes      | Complete set of API parameters as key-value pairs          |
-| `method`            | No       | HTTP method override (`GET`, `POST`, `PUT`, `DELETE`)      |
-| `additionalHeaders` | No       | Extra request headers                                      |
-| `rawMode`           | No       | Return raw response without formatting (default: `false`)  |
-| `generateCode`      | No       | Generate a code snippet for the request (default: `false`) |
-| `region`            | No       | SP-API region. Accepts `NA` / `EU` / `FE`, or country codes (`US`, `UK`, `DE`, `JP`, etc.). Falls back to `SP_API_REGION` env var, then warns and uses `NA`. |
+| Parameter           | Required | Description                                                                                                                                                                                                                       |
+| ------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`          | Yes      | SP-API endpoint ID (e.g., `orders_getOrders`)                                                                                                                                                                                     |
+| `parameters`        | Yes      | Complete set of API parameters as key-value pairs                                                                                                                                                                                 |
+| `method`            | No       | HTTP method override (`GET`, `POST`, `PUT`, `DELETE`)                                                                                                                                                                             |
+| `additionalHeaders` | No       | Extra request headers                                                                                                                                                                                                             |
+| `rawMode`           | No       | Return raw response without formatting (default: `false`)                                                                                                                                                                         |
+| `generateCode`      | No       | Generate a code snippet for the request (default: `false`)                                                                                                                                                                        |
+| `region`            | No       | SP-API region. Accepts `NA` / `EU` / `FE`, or country codes (`US`, `UK`, `DE`, `JP`, etc.). Selects both the endpoint and matching regional credentials when configured. Falls back to `SP_API_REGION`, then warns and uses `NA`. |
 
 ### SP-API Explore Catalog
 
@@ -160,19 +161,27 @@ Supports: Python, JavaScript, Java, C#, PHP.
 
 ### Environment Variables
 
-| Variable               | Required For                               | Description                                                       |
-| ---------------------- | ------------------------------------------ | ----------------------------------------------------------------- |
-| `SP_API_CLIENT_ID`     | `sp_api_execute`                           | SP-API OAuth client ID                                            |
-| `SP_API_CLIENT_SECRET` | `sp_api_execute`                           | SP-API OAuth client secret                                        |
-| `SP_API_REFRESH_TOKEN` | `sp_api_execute`                           | SP-API refresh token                                              |
-| `SP_API_REGION`        | Optional                                   | Default selling region for `sp_api_execute` when the `region` tool arg is omitted. `NA` / `EU` / `FE`, or country code. |
-| `SP_API_BASE_URL`      | Optional                                   | Override the SP-API base URL outright. When set, takes precedence over `region` and `SP_API_REGION`. |
-| `SP_API_OAUTH_URL`     | Optional                                   | Override OAuth token URL                                          |
-| `CATALOG_PATH`         | `sp_api_execute`, `sp_api_explore_catalog` | Path to Swagger/OpenAPI JSON files (default: `./swagger`)         |
-| `MAX_RESPONSE_TOKENS`  | Optional                                   | Max tokens before catalog responses truncate (default: `25000`)   |
-| `LOG_LEVEL`            | Optional                                   | Logging level: `error`, `warn`, `info`, `debug` (default: `info`) |
+| Variable                        | Required For                               | Description                                                                                                             |
+| ------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `SP_API_CLIENT_ID`              | `sp_api_execute`                           | SP-API OAuth client ID                                                                                                  |
+| `SP_API_CLIENT_SECRET`          | `sp_api_execute`                           | SP-API OAuth client secret                                                                                              |
+| `SP_API_REFRESH_TOKEN`          | `sp_api_execute`                           | SP-API refresh token                                                                                                    |
+| `SP_API_REGION`                 | Optional                                   | Default selling region for `sp_api_execute` when the `region` tool arg is omitted. `NA` / `EU` / `FE`, or country code. |
+| `SP_API_BASE_URL`               | Optional                                   | Override the SP-API base URL outright. When set, takes precedence over `region` and `SP_API_REGION`.                    |
+| `SP_API_OAUTH_URL`              | Optional                                   | Override OAuth token URL                                                                                                |
+| `SP_API_<REGION>_CLIENT_ID`     | Regional `sp_api_execute` credentials      | OAuth client ID for `NA`, `EU`, or `FE`                                                                                 |
+| `SP_API_<REGION>_CLIENT_SECRET` | Regional `sp_api_execute` credentials      | OAuth client secret for `NA`, `EU`, or `FE`                                                                             |
+| `SP_API_<REGION>_REFRESH_TOKEN` | Regional `sp_api_execute` credentials      | Refresh token for `NA`, `EU`, or `FE`                                                                                   |
+| `SP_API_<REGION>_BASE_URL`      | Optional regional override                 | Override the endpoint for one configured region                                                                         |
+| `CATALOG_PATH`                  | `sp_api_execute`, `sp_api_explore_catalog` | Path to Swagger/OpenAPI JSON files (default: `./swagger`)                                                               |
+| `MAX_RESPONSE_TOKENS`           | Optional                                   | Max tokens before catalog responses truncate (default: `25000`)                                                         |
+| `LOG_LEVEL`                     | Optional                                   | Logging level: `error`, `warn`, `info`, `debug` (default: `info`)                                                       |
 
 The `sp_api_reference`, `sp_api_optimize`, `sp_api_generate_code_sample`, and `sp_api_migration_assistant` tools work locally without any credentials or environment variables. SP-API credentials are only needed when using `sp_api_execute` to make live API calls.
+
+For one seller authorization, continue using the legacy unprefixed variables. To switch credentials on each request, configure one or more complete regional sets, such as `SP_API_NA_CLIENT_ID` / `SP_API_NA_CLIENT_SECRET` / `SP_API_NA_REFRESH_TOKEN` and the equivalent `SP_API_EU_*` variables. The `region` tool argument selects both the regional endpoint and its authenticator, and each authenticator maintains an independent access-token cache.
+
+If any regional credential variable is present, regional mode is enabled. The selected region must have a complete credential set; the unprefixed credentials are not used as a fallback. This fail-closed behavior prevents an EU request, for example, from silently using NA credentials.
 
 ## Usage Examples
 
