@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createAuthenticatorProviderFromEnv,
   SP_API_REGIONS,
+  validateCredentialEnvironment,
 } from "../../src/auth/sp-api-auth.js";
 
 const LEGACY_KEYS = [
@@ -115,5 +116,14 @@ describe("createAuthenticatorProviderFromEnv", () => {
 
   it("returns null when no credentials are configured", () => {
     expect(createAuthenticatorProviderFromEnv()).toBeNull();
+  });
+
+  it("rejects unresolved environment references without exposing values", () => {
+    process.env.SP_API_NA_CLIENT_ID =
+      "${mcp.servers.amazon-sp-api-na.env.SP_API_CLIENT_ID}";
+
+    expect(() => validateCredentialEnvironment()).toThrow(
+      "Unresolved environment reference in SP_API_NA_CLIENT_ID",
+    );
   });
 });

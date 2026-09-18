@@ -17,7 +17,10 @@ import {
   ExploreCatalogTool,
   exploreCatalogSchema,
 } from "./tools/explore-catalog-tool.js";
-import { createAuthenticatorProviderFromEnv } from "./auth/sp-api-auth.js";
+import {
+  createAuthenticatorProviderFromEnv,
+  validateCredentialEnvironment,
+} from "./auth/sp-api-auth.js";
 import type { ApiCatalog } from "./types/api-catalog.js";
 import { config } from "dotenv";
 import { readFileSync } from "fs";
@@ -45,6 +48,8 @@ class SPAPIDevMCPServer {
   private catalogPromise: Promise<ApiCatalog> | null = null;
 
   constructor() {
+    validateCredentialEnvironment();
+
     this.server = new McpServer({
       name: "selling-partner-api-dev-mcp",
       version: "1.3.0",

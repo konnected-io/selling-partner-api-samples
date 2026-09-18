@@ -20,6 +20,30 @@ export interface SpApiAuthenticatorProvider {
   getAuthenticator(region: SpApiRegion): SpApiAuthenticator;
 }
 
+const CREDENTIAL_ENV_SUFFIXES = [
+  "CLIENT_ID",
+  "CLIENT_SECRET",
+  "REFRESH_TOKEN",
+] as const;
+
+export function validateCredentialEnvironment(): void {
+  const credentialKeys = [
+    ...CREDENTIAL_ENV_SUFFIXES.map((suffix) => `SP_API_${suffix}`),
+    ...SP_API_REGIONS.flatMap((region) =>
+      CREDENTIAL_ENV_SUFFIXES.map((suffix) => `SP_API_${region}_${suffix}`),
+    ),
+  ];
+
+  for (const key of credentialKeys) {
+    const value = process.env[key];
+    if (value && /^\$\{[^}]+\}$/.test(value)) {
+      throw new Error(
+        `Unresolved environment reference in ${key}. Configure a concrete value or supported secret reference.`,
+      );
+    }
+  }
+}
+
 interface TokenResponse {
   access_token: string;
   refresh_token: string;
@@ -261,6 +285,8 @@ export const createAuthenticatorFromEnv = (): SpApiAuthenticator | null => {
  */
 export const createAuthenticatorProviderFromEnv =
   (): SpApiAuthenticatorProvider | null => {
+    validateCredentialEnvironment();
+
     const regionalAuthenticators: Partial<
       Record<SpApiRegion, SpApiAuthenticator>
     > = {};
