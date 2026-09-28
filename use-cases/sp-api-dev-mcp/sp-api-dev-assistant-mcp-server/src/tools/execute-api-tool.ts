@@ -215,6 +215,13 @@ export class ExecuteApiTool {
         authenticator,
       });
 
+      // Raw mode is intended for machine-to-machine handoffs. Returning the
+      // response body directly avoids wrapping signed report-document URLs in
+      // Markdown and preserves every character of the metadata payload.
+      if (params.rawMode && result.response.raw != null) {
+        return JSON.stringify(result.response.raw, null, 2);
+      }
+
       // Format the result
       return this.formatResult(result, params);
     } catch (error: unknown) {
