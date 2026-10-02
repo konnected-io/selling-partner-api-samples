@@ -2,6 +2,10 @@
 
 import { z } from "zod";
 import axios from "axios";
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ApiCatalog, ApiEndpoint, ApiParameter } from "../types/api-catalog.js";
 import { logger } from "../utils/logger.js";
 import {
@@ -28,6 +32,13 @@ export const executeApiSchema = z.object({
     .optional()
     .default(false)
     .describe("Return raw response if true"),
+  downloadReportDocument: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "For reports_getReportDocument only, download the presigned document inside the MCP process and return only protected temporary-artifact metadata. The signed URL and report rows are never returned.",
+    ),
   generateCode: z
     .boolean()
     .optional()
@@ -215,6 +226,25 @@ export class ExecuteApiTool {
         authenticator,
       });
 
+      if (params.downloadReportDocument) {
+        if (endpoint.id !== "reports_getReportDocument") {
+          return this.formatSafeDownloadError(
+            "unsupported_endpoint",
+            "downloadReportDocument is only valid for reports_getReportDocument",
+          );
+        }
+
+        if (!result.success) {
+          return this.formatSafeDownloadError(
+            "metadata_request_failed",
+            "SP-API did not return report-document metadata",
+            result.statusCode,
+          );
+        }
+
+        return await this.downloadReportDocumentArtifact(result.response.raw);
+      }
+
       // Raw mode is intended for machine-to-machine handoffs. Returning the
       // response body directly avoids wrapping signed report-document URLs in
       // Markdown and preserves every character of the metadata payload.
@@ -232,6 +262,117 @@ export class ExecuteApiTool {
         `Error executing SP-API request: ${errorMessage}`,
       );
     }
+  }
+
+  private async downloadReportDocumentArtifact(metadata: any): Promise<string> {
+    const documentUrl = metadata?.url;
+    const compressionAlgorithm =
+      metadata?.compressionAlgorithm === "GZIP" ? "GZIP" : null;
+
+    if (typeof documentUrl !== "string") {
+      return this.formatSafeDownloadError(
+        "invalid_metadata",
+        "Report-document metadata did not include a URL",
+      );
+    }
+
+    try {
+      const parsedUrl = new URL(documentUrl);
+      if (parsedUrl.protocol !== "https:") {
+        return this.formatSafeDownloadError(
+          "invalid_metadata",
+          "Report-document URL must use HTTPS",
+        );
+      }
+    } catch {
+      return this.formatSafeDownloadError(
+        "invalid_metadata",
+        "Report-document URL was invalid",
+      );
+    }
+
+    try {
+      logger.info("Downloading report document to protected temporary storage");
+      const response = await axios({
+        method: "GET",
+        url: documentUrl,
+        responseType: "arraybuffer",
+        maxRedirects: 0,
+        maxContentLength: 100 * 1024 * 1024,
+        maxBodyLength: 100 * 1024 * 1024,
+        validateStatus: () => true,
+      });
+
+      if (response.status < 200 || response.status >= 300) {
+        return this.formatSafeDownloadError(
+          "document_download_failed",
+          "Report-document download returned a non-success status",
+          response.status,
+        );
+      }
+
+      const content = Buffer.from(response.data);
+      const artifactDirectory = join(
+        tmpdir(),
+        "amazon-sp-api-mcp",
+        "report-documents",
+      );
+      await mkdir(artifactDirectory, { recursive: true, mode: 0o700 });
+      await chmod(artifactDirectory, 0o700);
+      const artifactPath = join(
+        artifactDirectory,
+        `report-document-${randomUUID()}.bin`,
+      );
+      await writeFile(artifactPath, content, { flag: "wx", mode: 0o600 });
+
+      logger.info(
+        `Stored protected report-document artifact (${content.byteLength} bytes)`,
+      );
+      return JSON.stringify(
+        {
+          ok: true,
+          artifact: {
+            path: artifactPath,
+            compressionAlgorithm,
+            byteLength: content.byteLength,
+          },
+          privacy: {
+            presignedUrlReturned: false,
+            responseBodyReturned: false,
+            rawRowsReturned: false,
+          },
+        },
+        null,
+        2,
+      );
+    } catch {
+      return this.formatSafeDownloadError(
+        "document_download_failed",
+        "Report-document download or protected-artifact write failed",
+      );
+    }
+  }
+
+  private formatSafeDownloadError(
+    error: string,
+    detail: string,
+    httpStatus?: number,
+  ): string {
+    return JSON.stringify(
+      {
+        ok: false,
+        error,
+        detail,
+        ...(httpStatus === undefined ? {} : { httpStatus }),
+        privacy: {
+          presignedUrlReturned: false,
+          responseBodyReturned: false,
+          rawRowsReturned: false,
+        },
+      },
+      null,
+      2,
+    );
   }
 
   /**
@@ -596,7 +737,11 @@ export class ExecuteApiTool {
         logger.info(`  ${key}: ${value}`);
       });
       logger.info("Body:");
-      logger.info(JSON.stringify(response.data, null, 2));
+      if (endpoint.id === "reports_getReportDocument") {
+        logger.info("[REDACTED REPORT-DOCUMENT METADATA]");
+      } else {
+        logger.info(JSON.stringify(response.data, null, 2));
+      }
       logger.info("==============================");
 
       logger.debug(
