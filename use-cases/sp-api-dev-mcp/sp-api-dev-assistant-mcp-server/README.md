@@ -14,18 +14,20 @@ A Model Context Protocol (MCP) server that provides tools for interacting with A
   - Optionally generates Node.js code snippets
   - Supports region-based endpoint routing (NA, EU, FE)
   - Supports separate credentials per selling region in one MCP process
+  - Can download report documents inside the MCP process and return only protected temporary-artifact metadata
 
 **Parameters**:
 
-| Parameter           | Required | Description                                                                                                                                                                                                                       |
-| ------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `endpoint`          | Yes      | SP-API endpoint ID (e.g., `orders_getOrders`)                                                                                                                                                                                     |
-| `parameters`        | Yes      | Complete set of API parameters as key-value pairs                                                                                                                                                                                 |
-| `method`            | No       | HTTP method override (`GET`, `POST`, `PUT`, `DELETE`)                                                                                                                                                                             |
-| `additionalHeaders` | No       | Extra request headers                                                                                                                                                                                                             |
-| `rawMode`           | No       | Return the exact response body as JSON without Markdown, request details, highlights, or URL abbreviation (default: `false`)                                                                                                      |
-| `generateCode`      | No       | Generate a code snippet for the request (default: `false`)                                                                                                                                                                        |
-| `region`            | No       | SP-API region. Accepts `NA` / `EU` / `FE`, or country codes (`US`, `UK`, `DE`, `JP`, etc.). Selects both the endpoint and matching regional credentials when configured. Falls back to `SP_API_REGION`, then warns and uses `NA`. |
+| Parameter                | Required | Description                                                                                                                                                                                                                       |
+| ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`               | Yes      | SP-API endpoint ID (e.g., `orders_getOrders`)                                                                                                                                                                                     |
+| `parameters`             | Yes      | Complete set of API parameters as key-value pairs                                                                                                                                                                                 |
+| `method`                 | No       | HTTP method override (`GET`, `POST`, `PUT`, `DELETE`)                                                                                                                                                                             |
+| `additionalHeaders`      | No       | Extra request headers                                                                                                                                                                                                             |
+| `rawMode`                | No       | Return the exact response body as JSON without Markdown, request details, highlights, or URL abbreviation (default: `false`)                                                                                                      |
+| `downloadReportDocument` | No       | For `reports_getReportDocument`, download the presigned document inside the MCP process and return only a protected temporary path, compression, byte count, and privacy flags (default: `false`)                                 |
+| `generateCode`           | No       | Generate a code snippet for the request (default: `false`)                                                                                                                                                                        |
+| `region`                 | No       | SP-API region. Accepts `NA` / `EU` / `FE`, or country codes (`US`, `UK`, `DE`, `JP`, etc.). Selects both the endpoint and matching regional credentials when configured. Falls back to `SP_API_REGION`, then warns and uses `NA`. |
 
 ### SP-API Explore Catalog
 
