@@ -1,5 +1,6 @@
 import axios from "axios";
 import { readFile, rm, stat } from "node:fs/promises";
+import { gzipSync } from "node:zlib";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SpApiAuthenticatorProvider } from "../../src/auth/sp-api-auth.js";
 import { ExecuteApiTool } from "../../src/tools/execute-api-tool.js";
@@ -99,7 +100,8 @@ describe("SP-API raw response mode", () => {
       "https://example-bucket.s3.amazonaws.com/report.tsv?" +
       "X-Amz-Algorithm=AWS4-HMAC-SHA256&" +
       `X-Amz-Signature=${"0123456789abcdef".repeat(16)}`;
-    const reportContent = Buffer.from("sku\tavailable\nTEST-SKU\t4\n");
+    const reportText = Buffer.from("sku\tavailable\nTEST-SKU\t4\n");
+    const reportContent = gzipSync(reportText);
     const stderr = vi
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
@@ -156,6 +158,10 @@ describe("SP-API raw response mode", () => {
       });
       expect(await readFile(artifactPath)).toEqual(reportContent);
       expect((await stat(artifactPath)).mode & 0o777).toBe(0o600);
+      expect(vi.mocked(axios).mock.calls[1]?.[0]).toMatchObject({
+        responseType: "arraybuffer",
+        decompress: false,
+      });
       expect(result).not.toContain(signedUrl);
       expect(JSON.stringify(stderr.mock.calls)).not.toContain(signedUrl);
     } finally {

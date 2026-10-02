@@ -297,6 +297,10 @@ export class ExecuteApiTool {
         method: "GET",
         url: documentUrl,
         responseType: "arraybuffer",
+        // Preserve the bytes described by SP-API's compressionAlgorithm.
+        // Axios otherwise transparently decodes HTTP Content-Encoding and can
+        // leave downstream consumers trying to decompress the report twice.
+        decompress: false,
         maxRedirects: 0,
         maxContentLength: 100 * 1024 * 1024,
         maxBodyLength: 100 * 1024 * 1024,
